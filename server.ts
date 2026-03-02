@@ -9,7 +9,7 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-const JWT_SECRET = process.env.JWT_SECRET || "quantiva_secret_key_123";
+const JWT_SECRET = process.env.JWT_SECRET || "traderxau_secret_key_123";
 
 async function startServer() {
   const app = express();
