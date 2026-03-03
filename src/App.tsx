@@ -38,7 +38,7 @@ import {
   XCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { createChart, ColorType, IChartApi, ISeriesApi, CandlestickData, CandlestickSeries, LineSeries, LineStyle } from 'lightweight-charts';
+import { createChart, ColorType, IChartApi, ISeriesApi, CandlestickData, CandlestickSeries, LineSeries, LineStyle, HistogramSeries, HistogramData } from 'lightweight-charts';
 import { io } from 'socket.io-client';
 import MetaTraderChart from './components/MetaTraderChart';
 
@@ -57,6 +57,7 @@ interface Signal {
   potential_profit?: number;
   potential_loss?: number;
   isBot?: boolean;
+  timeframe?: string;
 }
 
 interface HeatmapItem {
@@ -129,7 +130,7 @@ const Header = () => (
   </header>
 );
 
-const CandlestickChart = ({ data, indicators, activeTool, onChartClick, fibLevels, activeOrders, timeframe }: { data: any[], indicators: any, activeTool: string | null, onChartClick: (param: any) => void, fibLevels: any[], activeOrders: Signal[], timeframe: string }) => {
+const CandlestickChart = ({ data, indicators, activeTool, onChartClick, fibLevels, activeOrders, timeframe, tradeHistory }: { data: any[], indicators: any, activeTool: string | null, onChartClick: (param: any) => void, fibLevels: any[], activeOrders: Signal[], timeframe: string, tradeHistory: any[] }) => {
   const chartContainerRef = React.useRef<HTMLDivElement>(null);
   const chartRef = React.useRef<IChartApi | null>(null);
   const candleSeriesRef = React.useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -138,8 +139,13 @@ const CandlestickChart = ({ data, indicators, activeTool, onChartClick, fibLevel
   const unbiasedSeriesRef = React.useRef<ISeriesApi<"Line"> | null>(null);
   const rsiChartRef = React.useRef<IChartApi | null>(null);
   const rsiSeriesRef = React.useRef<ISeriesApi<"Line"> | null>(null);
+  const macdChartRef = React.useRef<IChartApi | null>(null);
+  const macdSeriesRef = React.useRef<ISeriesApi<"Line"> | null>(null);
+  const macdSignalSeriesRef = React.useRef<ISeriesApi<"Line"> | null>(null);
+  const macdHistogramSeriesRef = React.useRef<ISeriesApi<"Histogram"> | null>(null);
   const fibSeriesRef = React.useRef<ISeriesApi<"Line">[]>([]);
   const rsiContainerRef = React.useRef<HTMLDivElement>(null);
+  const macdContainerRef = React.useRef<HTMLDivElement>(null);
   const orderLinesRef = React.useRef<any[]>([]);
 
   useEffect(() => {
@@ -179,9 +185,11 @@ const CandlestickChart = ({ data, indicators, activeTool, onChartClick, fibLevel
     candleSeriesRef.current = candleSeries;
 
     chart.subscribeClick((param: any) => {
-      if (param.point && candleSeriesRef.current) {
+      if (param.point && candleSeriesRef.current && param.time) {
         const price = candleSeriesRef.current.coordinateToPrice(param.point.y);
-        onChartClick({ ...param, price });
+        if (price !== null) {
+          onChartClick({ ...param, price });
+        }
       }
     });
 
@@ -199,6 +207,10 @@ const CandlestickChart = ({ data, indicators, activeTool, onChartClick, fibLevel
       if (rsiChartRef.current) {
         rsiChartRef.current.remove();
         rsiChartRef.current = null;
+      }
+      if (macdChartRef.current) {
+        macdChartRef.current.remove();
+        macdChartRef.current = null;
       }
     };
   }, []);
@@ -254,7 +266,59 @@ const CandlestickChart = ({ data, indicators, activeTool, onChartClick, fibLevel
       rsiChartRef.current = null;
       rsiSeriesRef.current = null;
     }
-  }, [indicators.rsi, data]);
+
+    // MACD Chart Setup
+    if (indicators.macd && !macdChartRef.current && macdContainerRef.current) {
+      const macdChart = createChart(macdContainerRef.current, {
+        layout: {
+          background: { type: ColorType.Solid, color: 'transparent' },
+          textColor: 'rgba(255, 255, 255, 0.4)',
+        },
+        grid: {
+          vertLines: { color: 'rgba(255, 255, 255, 0.05)' },
+          horzLines: { color: 'rgba(255, 255, 255, 0.05)' },
+        },
+        width: macdContainerRef.current.clientWidth,
+        height: 100,
+        timeScale: { visible: false },
+      });
+
+      macdHistogramSeriesRef.current = macdChart.addSeries(HistogramSeries, {
+        color: '#26a69a',
+        priceFormat: { type: 'volume' },
+        priceScaleId: '', // overlay
+      });
+      
+      macdSeriesRef.current = macdChart.addSeries(LineSeries, {
+        color: '#2962FF',
+        lineWidth: 1,
+        title: 'MACD',
+      });
+
+      macdSignalSeriesRef.current = macdChart.addSeries(LineSeries, {
+        color: '#FF6D00',
+        lineWidth: 1,
+        title: 'Signal',
+      });
+
+      macdChartRef.current = macdChart;
+
+      // Sync time scales
+      chartRef.current?.timeScale().subscribeVisibleTimeRangeChange((range) => {
+        macdChart.timeScale().setVisibleRange(range as any);
+      });
+
+      macdChart.timeScale().subscribeVisibleTimeRangeChange((range) => {
+        chartRef.current?.timeScale().setVisibleRange(range as any);
+      });
+    } else if (!indicators.macd && macdChartRef.current) {
+      macdChartRef.current.remove();
+      macdChartRef.current = null;
+      macdSeriesRef.current = null;
+      macdSignalSeriesRef.current = null;
+      macdHistogramSeriesRef.current = null;
+    }
+  }, [indicators.rsi, indicators.macd, data]);
 
   useEffect(() => {
     if (chartRef.current) {
@@ -392,12 +456,72 @@ const CandlestickChart = ({ data, indicators, activeTool, onChartClick, fibLevel
         rsiSeriesRef.current.setData(rsiData);
       }
 
+      // MACD Data
+      if (indicators.macd && macdSeriesRef.current && macdSignalSeriesRef.current && macdHistogramSeriesRef.current && data.length > 26) {
+        const macdData = [];
+        const signalData = [];
+        const histogramData = [];
+        
+        const ema12Period = 12;
+        const ema26Period = 26;
+        const signalPeriod = 9;
+
+        const calculateEMA = (data: any[], period: number) => {
+          const k = 2 / (period + 1);
+          let ema = data[0].close;
+          const emaValues = [{ time: data[0].time, value: ema }];
+          for (let i = 1; i < data.length; i++) {
+            ema = (data[i].close * k) + (ema * (1 - k));
+            emaValues.push({ time: data[i].time, value: ema });
+          }
+          return emaValues;
+        };
+
+        const ema12 = calculateEMA(data, ema12Period);
+        const ema26 = calculateEMA(data, ema26Period);
+
+        const macdValues = [];
+        for (let i = 0; i < data.length; i++) {
+          const val = ema12[i].value - ema26[i].value;
+          macdValues.push({ time: data[i].time, value: val });
+        }
+
+        // Signal line (EMA 9 of MACD)
+        const kSignal = 2 / (signalPeriod + 1);
+        let signalLine = macdValues[0].value;
+        const signalValues = [{ time: macdValues[0].time, value: signalLine }];
+        for (let i = 1; i < macdValues.length; i++) {
+          signalLine = (macdValues[i].value * kSignal) + (signalLine * (1 - kSignal));
+          signalValues.push({ time: macdValues[i].time, value: signalLine });
+        }
+
+        for (let i = 0; i < macdValues.length; i++) {
+          const hist = macdValues[i].value - signalValues[i].value;
+          macdData.push(macdValues[i]);
+          signalData.push(signalValues[i]);
+          histogramData.push({
+            time: macdValues[i].time,
+            value: hist,
+            color: hist >= 0 ? '#26a69a' : '#ef5350',
+          });
+        }
+
+        macdSeriesRef.current.setData(macdData);
+        macdSignalSeriesRef.current.setData(signalData);
+        macdHistogramSeriesRef.current.setData(histogramData as any);
+      }
+
       // Active Orders Visualization
       if (candleSeriesRef.current) {
         orderLinesRef.current.forEach(line => candleSeriesRef.current?.removePriceLine(line));
         orderLinesRef.current = [];
 
         activeOrders.forEach(order => {
+          const currentPrice = data[data.length - 1]?.close || order.entry_price;
+          const isBuy = order.type === 'Buy';
+          const pips = isBuy ? (currentPrice - order.entry_price) : (order.entry_price - currentPrice);
+          const currentPL = pips * (order.lot_size || 0.1) * 100;
+
           // Entry Line
           const entryLine = candleSeriesRef.current!.createPriceLine({
             price: order.entry_price,
@@ -405,7 +529,7 @@ const CandlestickChart = ({ data, indicators, activeTool, onChartClick, fibLevel
             lineWidth: 2,
             lineStyle: LineStyle.Solid,
             axisLabelVisible: true,
-            title: `ENTRY ${order.type.toUpperCase()} (${order.lot_size?.toFixed(2)} LOTS)`,
+            title: `ENTRY ${order.type.toUpperCase()} (${order.lot_size?.toFixed(2)} LOTS) | P/L: ${currentPL >= 0 ? '+' : ''}$${currentPL.toFixed(2)}`,
           });
           
           // SL Line
@@ -430,9 +554,28 @@ const CandlestickChart = ({ data, indicators, activeTool, onChartClick, fibLevel
 
           orderLinesRef.current.push(entryLine, slLine, tpLine);
         });
+
+        // Markers for closed trades
+        const markers: any[] = [];
+        tradeHistory.forEach(trade => {
+          // Convert ms to seconds for lightweight charts
+          const tradeTime = Math.floor(trade.close_time / 1000);
+          
+          markers.push({
+            time: tradeTime,
+            position: trade.type === 'Buy' ? 'aboveBar' : 'belowBar',
+            color: trade.pl >= 0 ? '#10b981' : '#ef4444',
+            shape: trade.type === 'Buy' ? 'arrowDown' : 'arrowUp',
+            text: `${trade.pl >= 0 ? 'WIN' : 'LOSS'} $${Math.abs(trade.pl).toFixed(2)}`,
+          });
+        });
+        
+        if (markers.length > 0) {
+          candleSeriesRef.current.setMarkers(markers);
+        }
       }
     }
-  }, [data, indicators, fibLevels, activeOrders]);
+  }, [data, indicators, fibLevels, activeOrders, tradeHistory]);
 
   return (
     <div className="flex flex-col gap-2 relative">
@@ -444,6 +587,7 @@ const CandlestickChart = ({ data, indicators, activeTool, onChartClick, fibLevel
       </div>
       <div ref={chartContainerRef} className="w-full" />
       <div ref={rsiContainerRef} className={`w-full transition-all duration-300 ${indicators.rsi ? 'h-[100px] opacity-100' : 'h-0 opacity-0 overflow-hidden'}`} />
+      <div ref={macdContainerRef} className={`w-full transition-all duration-300 ${indicators.macd ? 'h-[100px] opacity-100' : 'h-0 opacity-0 overflow-hidden'}`} />
     </div>
   );
 };
@@ -639,6 +783,7 @@ export default function App() {
   const [botAnalysis, setBotAnalysis] = useState<any>(null);
   const [tpFeedback, setTpFeedback] = useState<string | null>(null);
   const [activeOrders, setActiveOrders] = useState<Signal[]>([]);
+  const [tradeHistory, setTradeHistory] = useState<(Signal & { close_price: number; close_time: number; pl: number })[]>([]);
   const [lotSize, setLotSize] = useState(0.1);
   const [expandedOrderId, setExpandedOrderId] = useState<number | null>(null);
   const [isPro, setIsPro] = useState(true); // Activated Pro
@@ -661,9 +806,10 @@ export default function App() {
     sma: true,
     ema: false,
     unbiased: true,
-    rsi: false
+    rsi: false,
+    macd: false
   });
-  const [chartType, setChartType] = useState<'ai' | 'mt5'>('ai');
+  const [chartType, setChartType] = useState<'ai' | 'mt5'>('mt5');
 
   useEffect(() => {
     setIsChangingTimeframe(true);
@@ -896,10 +1042,49 @@ export default function App() {
     }
   };
 
+  const handleMarketOrder = (type: 'Buy' | 'Sell', lot: number) => {
+    const currentPrice = prices['XAUUSD']?.close || 2035.50;
+    const sl = type === 'Buy' ? currentPrice - 5 : currentPrice + 5;
+    const tp = type === 'Buy' ? currentPrice + 10 : currentPrice - 10;
+    
+    const newOrder: Signal = {
+      id: Date.now(),
+      symbol: 'XAUUSD',
+      type: type,
+      entry_price: currentPrice,
+      stop_loss: sl,
+      take_profit: tp,
+      timeframe: timeframe,
+      score: 100,
+      created_at: new Date().toISOString(),
+      confirmed: true,
+      lot_size: lot,
+      potential_profit: Math.abs(tp - currentPrice) * lot * 100,
+      potential_loss: Math.abs(currentPrice - sl) * lot * 100
+    };
+    
+    setActiveOrders(prev => [...prev, newOrder]);
+    
+    setTerminalLogs(prev => [{
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      type: 'SIGNAL',
+      message: `Market ${type} order executed at ${currentPrice.toFixed(2)}`
+    }, ...prev]);
+  };
+
   const handleCloseOrder = (id: number) => {
     const orderToClose = activeOrders.find(o => o.id === id);
     if (orderToClose) {
       const pl = calculatePL(orderToClose);
+      const currentPrice = prices[orderToClose.symbol]?.close || orderToClose.entry_price;
+      
+      setTradeHistory(prev => [{
+        ...orderToClose,
+        close_price: currentPrice,
+        close_time: Date.now(),
+        pl: pl
+      }, ...prev]);
+
       setActiveAccount(prev => ({
         ...prev,
         balance: prev.balance + pl
@@ -1047,13 +1232,13 @@ export default function App() {
                             <button onClick={() => setLotSize(lotSize + 0.01)} className="text-white/40 hover:text-white"><Plus size={10} /></button>
                           </div>
                           <button 
-                            onClick={() => handleConfirm(Date.now(), lotSize, 0, 0)} // Mock instant execution
+                            onClick={() => handleMarketOrder('Sell', lotSize)}
                             className="bg-red-500/20 text-red-400 px-3 py-1 rounded-lg text-[10px] font-bold border border-red-500/30 active:scale-95 transition-all"
                           >
                             SELL {prices['XAUUSD']?.close}
                           </button>
                           <button 
-                            onClick={() => handleConfirm(Date.now(), lotSize, 0, 0)} // Mock instant execution
+                            onClick={() => handleMarketOrder('Buy', lotSize)}
                             className="bg-emerald-500/20 text-emerald-400 px-3 py-1 rounded-lg text-[10px] font-bold border border-emerald-500/30 active:scale-95 transition-all"
                           >
                             BUY {prices['XAUUSD']?.close}
@@ -1142,48 +1327,75 @@ export default function App() {
                 
                 <div className="relative">
                   {chartType === 'ai' ? (
-                    <CandlestickChart 
-                      data={chartData} 
-                      indicators={indicators} 
-                      activeTool={activeTool}
-                      fibLevels={fibLevels}
-                      activeOrders={activeOrders}
-                      timeframe={timeframe}
-                      onChartClick={(param) => {
-                        if (activeTool === 'hline') {
-                          setActiveTool(null);
-                        } else if (activeTool === 'fib') {
-                          if (!fibPoints || (fibPoints.start && fibPoints.end)) {
-                            setFibPoints({ start: { price: param.price, time: param.time }, end: null });
-                            setFibLevels([]);
-                          } else {
-                            const startPrice = fibPoints.start.price;
-                            const endPrice = param.price;
-                            const diff = startPrice - endPrice;
-                            
-                            const ratios = [
-                              { r: 0, label: '0.0%', color: '#ef4444' },
-                              { r: 0.236, label: '23.6%', color: '#f59e0b' },
-                              { r: 0.382, label: '38.2%', color: '#10b981' },
-                              { r: 0.5, label: '50.0%', color: '#3b82f6' },
-                              { r: 0.618, label: '61.8%', color: '#8b5cf6' },
-                              { r: 0.786, label: '78.6%', color: '#ec4899' },
-                              { r: 1, label: '100.0%', color: '#ffffff' },
-                            ];
-
-                            const levels = ratios.map(ratio => ({
-                              price: startPrice - (diff * ratio.r),
-                              label: ratio.label,
-                              color: ratio.color
-                            }));
-
-                            setFibLevels(levels);
-                            setFibPoints({ ...fibPoints, end: { price: param.price, time: param.time } });
+                    <>
+                      <CandlestickChart 
+                        data={chartData} 
+                        indicators={indicators} 
+                        activeTool={activeTool}
+                        fibLevels={fibLevels}
+                        activeOrders={activeOrders}
+                        tradeHistory={tradeHistory}
+                        timeframe={timeframe}
+                        onChartClick={(param) => {
+                          if (!param || param.price === undefined || param.time === undefined) return;
+                          if (activeTool === 'hline') {
                             setActiveTool(null);
+                          } else if (activeTool === 'fib') {
+                            if (!fibPoints || (fibPoints.start && fibPoints.end)) {
+                              setFibPoints({ start: { price: param.price, time: param.time }, end: null });
+                              setFibLevels([]);
+                            } else {
+                              const startPrice = fibPoints.start.price;
+                              const endPrice = param.price;
+                              const diff = startPrice - endPrice;
+                              
+                              const ratios = [
+                                { r: 0, label: '0.0%', color: '#ef4444' },
+                                { r: 0.236, label: '23.6%', color: '#f59e0b' },
+                                { r: 0.382, label: '38.2%', color: '#10b981' },
+                                { r: 0.5, label: '50.0%', color: '#3b82f6' },
+                                { r: 0.618, label: '61.8%', color: '#8b5cf6' },
+                                { r: 0.786, label: '78.6%', color: '#ec4899' },
+                                { r: 1, label: '100.0%', color: '#ffffff' },
+                              ];
+
+                              const levels = ratios.map(ratio => ({
+                                price: startPrice - (diff * ratio.r),
+                                label: ratio.label,
+                                color: ratio.color
+                              }));
+
+                              setFibLevels(levels);
+                              setFibPoints({ ...fibPoints, end: { price: param.price, time: param.time } });
+                              setActiveTool(null);
+                            }
                           }
-                        }
-                      }}
-                    />
+                        }}
+                      />
+                      {activeOrders.length > 0 && (
+                        <div className="absolute top-4 right-4 z-10 flex flex-col gap-2 max-h-[200px] overflow-y-auto no-scrollbar">
+                          {activeOrders.map(order => {
+                            const pl = calculatePL(order);
+                            return (
+                              <motion.div 
+                                initial={{ x: 20, opacity: 0 }}
+                                animate={{ x: 0, opacity: 1 }}
+                                key={order.id} 
+                                className="glass px-3 py-2 rounded-xl flex items-center gap-3 border-white/5 shadow-xl backdrop-blur-md"
+                              >
+                                <div className="flex flex-col">
+                                  <span className="text-[8px] font-bold text-white/40 uppercase">{order.type} {order.symbol}</span>
+                                  <span className="text-[10px] font-mono font-bold">{order.entry_price.toFixed(2)}</span>
+                                </div>
+                                <div className={`text-xs font-mono font-bold ${pl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                  {pl >= 0 ? '+' : ''}${pl.toFixed(2)}
+                                </div>
+                              </motion.div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </>
                   ) : (
                     <MetaTraderChart />
                   )}
@@ -1250,32 +1462,16 @@ export default function App() {
                   >
                     RSI
                   </button>
+                  <button 
+                    onClick={() => setIndicators(prev => ({ ...prev, macd: !prev.macd }))}
+                    className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all whitespace-nowrap ${indicators.macd ? 'bg-indigo-500 text-white' : 'bg-white/5 text-white/40'}`}
+                  >
+                    MACD
+                  </button>
                 </div>
               </div>
 
-              {/* Terminal Log */}
-              <div className="glass rounded-3xl p-6 border-white/5 mb-8">
-                <div className="flex items-center gap-2 mb-4">
-                  <Hash size={14} className="text-white/40" />
-                  <span className="text-[10px] uppercase tracking-widest font-bold text-white/40">Terminal Log</span>
-                </div>
-                <div className="space-y-3 font-mono text-[9px]">
-                  {terminalLogs.map((log, idx) => (
-                    <div key={idx} className="flex gap-3">
-                      <span className="text-white/20">{log.time}</span>
-                      <span className={
-                        log.type === 'SYSTEM' ? 'text-emerald-400' : 
-                        log.type === 'SIGNAL' ? 'text-amber-400' : 
-                        log.type === 'PROFIT' ? 'text-emerald-400' :
-                        log.type === 'LOSS' ? 'text-red-400' :
-                        'text-white/40'
-                      }>[{log.type}]</span>
-                      <span className="text-white/60">{log.message}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
+              {/* Active Signals */}
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-lg font-bold tracking-tight">Active Signals</h2>
                 <div className="flex items-center gap-2 px-2 py-0.5 bg-emerald-500/10 rounded-full">
@@ -1606,7 +1802,7 @@ export default function App() {
                 </div>
               )}
 
-              {activeOrders.length === 0 ? (
+              {activeOrders.length === 0 && tradeHistory.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-20 text-center">
                   <div className="w-16 h-16 rounded-full glass flex items-center justify-center mb-4">
                     <History size={32} className="text-white/20" />
@@ -1615,9 +1811,11 @@ export default function App() {
                   <p className="text-sm text-white/40 px-12">Your executed trades will appear here once you confirm a signal.</p>
                 </div>
               ) : (
-                <div className="space-y-4">
-                  <p className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-2">Active Positions</p>
-                  {activeOrders.map((order) => (
+                <div className="space-y-6">
+                  {activeOrders.length > 0 && (
+                    <div className="space-y-4">
+                      <p className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-2">Active Positions</p>
+                      {activeOrders.map((order) => (
                     <div 
                       key={order.id} 
                       className={`glass rounded-2xl border-white/5 relative overflow-hidden transition-all duration-300 ${expandedOrderId === order.id ? 'p-6 bg-white/5' : 'p-4'}`}
@@ -1693,6 +1891,54 @@ export default function App() {
                   ))}
                 </div>
               )}
+
+                  {tradeHistory.length > 0 && (
+                    <div className="space-y-4">
+                      <p className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-2">Closed Trades</p>
+                      {tradeHistory.map((trade) => (
+                        <div 
+                          key={trade.id} 
+                          className="glass rounded-2xl border-white/5 p-4 bg-white/2"
+                        >
+                          <div className="flex justify-between items-center mb-3">
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold">{trade.symbol}</span>
+                              <span className={`text-[8px] px-1.5 py-0.5 rounded-md font-bold uppercase ${trade.type === 'Buy' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
+                                {trade.type}
+                              </span>
+                              <span className="text-[8px] px-1.5 py-0.5 rounded-md font-bold uppercase bg-white/5 text-white/40">
+                                {trade.lot_size?.toFixed(2)} LOTS
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] text-white/20 font-mono">{new Date(trade.close_time).toLocaleTimeString()}</span>
+                              <div className={`px-2 py-0.5 rounded text-[8px] font-bold uppercase ${trade.pl >= 0 ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}`}>
+                                {trade.pl >= 0 ? 'PROFIT' : 'LOSS'}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-3 gap-2">
+                            <div>
+                              <p className="text-[8px] uppercase text-white/40 font-bold">Entry</p>
+                              <p className="text-xs font-mono">{trade.entry_price.toFixed(2)}</p>
+                            </div>
+                            <div>
+                              <p className="text-[8px] uppercase text-white/40 font-bold">Exit</p>
+                              <p className="text-xs font-mono">{trade.close_price.toFixed(2)}</p>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-[8px] uppercase text-white/40 font-bold">Result</p>
+                              <p className={`text-xs font-mono font-bold ${trade.pl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                {trade.pl >= 0 ? '+' : ''}${trade.pl.toFixed(2)}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </motion.div>
           )}
 
@@ -1706,6 +1952,29 @@ export default function App() {
               <h2 className="text-2xl font-bold tracking-tight mb-8">Terminal Settings</h2>
               
               <div className="space-y-6">
+                {/* Terminal Log */}
+                <div className="glass rounded-3xl p-6 border-white/5">
+                  <div className="flex items-center gap-2 mb-4">
+                    <Hash size={14} className="text-white/40" />
+                    <span className="text-[10px] uppercase tracking-widest font-bold text-white/40">Terminal Log</span>
+                  </div>
+                  <div className="space-y-3 font-mono text-[9px]">
+                    {terminalLogs.map((log, idx) => (
+                      <div key={idx} className="flex gap-3">
+                        <span className="text-white/20">{log.time}</span>
+                        <span className={
+                          log.type === 'SYSTEM' ? 'text-emerald-400' : 
+                          log.type === 'SIGNAL' ? 'text-amber-400' : 
+                          log.type === 'PROFIT' ? 'text-emerald-400' :
+                          log.type === 'LOSS' ? 'text-red-400' :
+                          'text-white/40'
+                        }>[{log.type}]</span>
+                        <span className="text-white/60">{log.message}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
                 {/* Account Switcher */}
                 <div className="glass rounded-3xl p-6 border-white/5">
                   <p className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-4">Active Account</p>
@@ -1801,58 +2070,50 @@ export default function App() {
                     </div>
                   </div>
                 </div>
-              </div>
-            </motion.div>
-          )}
 
-          {activeTab === 'dashboard' && (
-            <motion.div 
-              key="dashboard-extra"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-            >
-              <div className="pt-4">
-                <p className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-4 px-2">Mobile Experience</p>
-                
-                <div className="glass rounded-3xl p-6 border-white/5 bg-gradient-to-br from-white/5 to-transparent">
-                  <div className="flex items-center gap-4 mb-6">
-                    <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 flex items-center justify-center text-emerald-400">
-                      <Smartphone size={24} />
+                {/* Mobile Experience */}
+                <div className="pt-4">
+                  <p className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-4 px-2">Mobile Experience</p>
+                  
+                  <div className="glass rounded-3xl p-6 border-white/5 bg-gradient-to-br from-white/5 to-transparent">
+                    <div className="flex items-center gap-4 mb-6">
+                      <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 flex items-center justify-center text-emerald-400">
+                        <Smartphone size={24} />
+                      </div>
+                      <div>
+                        <h4 className="font-bold">Download App</h4>
+                        <p className="text-xs text-white/40">Trade anywhere, anytime.</p>
+                      </div>
                     </div>
-                    <div>
-                      <h4 className="font-bold">Download App</h4>
-                      <p className="text-xs text-white/40">Trade anywhere, anytime.</p>
-                    </div>
-                  </div>
 
-                  <div className="grid grid-cols-2 gap-3">
-                    <button className="flex items-center justify-center gap-2 py-3 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition-all">
-                      <Apple size={18} />
-                      <span className="text-[10px] font-bold uppercase tracking-wider">App Store</span>
-                    </button>
-                    <button className="flex items-center justify-center gap-2 py-3 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition-all">
-                      <Play size={18} />
-                      <span className="text-[10px] font-bold uppercase tracking-wider">Play Store</span>
-                    </button>
-                  </div>
-
-                  <div className="mt-4 p-4 rounded-2xl bg-white/5 border border-dashed border-white/10">
-                    <div className="flex items-center gap-2 mb-2">
-                      <Download size={14} className="text-emerald-400" />
-                      <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-400">Web App (PWA)</span>
+                    <div className="grid grid-cols-2 gap-3">
+                      <button className="flex items-center justify-center gap-2 py-3 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition-all">
+                        <Apple size={18} />
+                        <span className="text-[10px] font-bold uppercase tracking-wider">App Store</span>
+                      </button>
+                      <button className="flex items-center justify-center gap-2 py-3 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition-all">
+                        <Play size={18} />
+                        <span className="text-[10px] font-bold uppercase tracking-wider">Play Store</span>
+                      </button>
                     </div>
-                    <p className="text-[10px] text-white/40 leading-relaxed">
-                      To install as a Web App: Tap <span className="text-white">Share</span> then <span className="text-white">"Add to Home Screen"</span> in your browser menu.
-                    </p>
+
+                    <div className="mt-4 p-4 rounded-2xl bg-white/5 border border-dashed border-white/10">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Download size={14} className="text-emerald-400" />
+                        <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-400">Web App (PWA)</span>
+                      </div>
+                      <p className="text-[10px] text-white/40 leading-relaxed">
+                        To install as a Web App: Tap <span className="text-white">Share</span> then <span className="text-white">"Add to Home Screen"</span> in your browser menu.
+                      </p>
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              <div className="mt-12 p-6 glass rounded-3xl border-emerald-500/20">
-                <h4 className="text-emerald-400 font-bold mb-2">TraderXau Pro</h4>
-                <p className="text-xs text-white/60 mb-4">Unlock advanced AI signals and multi-timeframe heatmap analysis.</p>
-                <button className="w-full py-3 bg-emerald-500 text-black font-bold rounded-xl text-sm">UPGRADE NOW</button>
+                <div className="mt-6 p-6 glass rounded-3xl border-emerald-500/20">
+                  <h4 className="text-emerald-400 font-bold mb-2">TraderXau Pro</h4>
+                  <p className="text-xs text-white/60 mb-4">Unlock advanced AI signals and multi-timeframe heatmap analysis.</p>
+                  <button className="w-full py-3 bg-emerald-500 text-black font-bold rounded-xl text-sm">UPGRADE NOW</button>
+                </div>
               </div>
             </motion.div>
           )}
