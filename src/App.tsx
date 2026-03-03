@@ -40,6 +40,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { createChart, ColorType, IChartApi, ISeriesApi, CandlestickData, CandlestickSeries, LineSeries, LineStyle } from 'lightweight-charts';
 import { io } from 'socket.io-client';
+import MetaTraderChart from './components/MetaTraderChart';
 
 // --- Types ---
 interface Signal {
@@ -253,7 +254,7 @@ const CandlestickChart = ({ data, indicators, activeTool, onChartClick, fibLevel
       rsiChartRef.current = null;
       rsiSeriesRef.current = null;
     }
-  }, [indicators.rsi]);
+  }, [indicators.rsi, data]);
 
   useEffect(() => {
     if (chartRef.current) {
@@ -643,6 +644,11 @@ export default function App() {
   const [isPro, setIsPro] = useState(true); // Activated Pro
   const [activeAccount, setActiveAccount] = useState<any>({ broker_name: 'TraderXau Demo', account_type: 'Demo', balance: 10000 });
   const [brokerAccounts, setBrokerAccounts] = useState<any[]>([]);
+  const [terminalLogs, setTerminalLogs] = useState<any[]>([
+    { time: '12:45:12', type: 'SYSTEM', message: 'AI Engine synchronized with OANDA liquidity...' },
+    { time: '12:44:05', type: 'SIGNAL', message: 'New Bullish divergence detected on M15 timeframe.' },
+    { time: '12:42:30', type: 'INFO', message: 'Risk parameters updated to 1.5% per trade.' }
+  ]);
   const [showConnectForm, setShowConnectForm] = useState(false);
   const [activeTool, setActiveTool] = useState<string | null>(null);
   const [showTradingPanel, setShowTradingPanel] = useState(true);
@@ -657,6 +663,7 @@ export default function App() {
     unbiased: true,
     rsi: false
   });
+  const [chartType, setChartType] = useState<'ai' | 'mt5'>('ai');
 
   useEffect(() => {
     setIsChangingTimeframe(true);
@@ -664,6 +671,56 @@ export default function App() {
     const timer = setTimeout(() => setIsChangingTimeframe(false), 800);
     return () => clearTimeout(timer);
   }, [timeframe]);
+
+  const calculatePL = (order: Signal) => {
+    const currentPrice = prices['XAUUSD']?.close || order.entry_price;
+    const diff = order.type === 'Buy' ? currentPrice - order.entry_price : order.entry_price - currentPrice;
+    return diff * (order.lot_size || 0.1) * 100;
+  };
+
+  useEffect(() => {
+    const currentPrice = prices['XAUUSD']?.close;
+    if (!currentPrice || activeOrders.length === 0) return;
+
+    const ordersToClose: number[] = [];
+    activeOrders.forEach(order => {
+      if (order.symbol !== 'XAUUSD') return;
+
+      const isBuy = order.type === 'Buy';
+      const hitTP = isBuy ? currentPrice >= order.take_profit : currentPrice <= order.take_profit;
+      const hitSL = isBuy ? currentPrice <= order.stop_loss : currentPrice >= order.stop_loss;
+
+      if (hitTP || hitSL) {
+        ordersToClose.push(order.id);
+        
+        const pl = calculatePL(order);
+        const now = new Date();
+        const timeStr = `${now.getHours()}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
+        
+        setTerminalLogs(prev => [
+          { 
+            time: timeStr, 
+            type: hitTP ? 'PROFIT' : 'LOSS', 
+            message: `Order closed at ${currentPrice.toFixed(2)} (${hitTP ? 'TP' : 'SL'} hit). P/L: ${pl >= 0 ? '+' : ''}${pl.toFixed(2)}` 
+          },
+          ...prev.slice(0, 9)
+        ]);
+      }
+    });
+
+    if (ordersToClose.length > 0) {
+      setActiveOrders(prev => prev.filter(o => !ordersToClose.includes(o.id)));
+      
+      // Update balance
+      ordersToClose.forEach(id => {
+        const order = activeOrders.find(o => o.id === id);
+        if (order) {
+          const pl = calculatePL(order);
+          setActiveAccount((prev: any) => ({ ...prev, balance: prev.balance + pl }));
+        }
+      });
+    }
+  }, [prices, activeOrders]);
 
   useEffect(() => {
     const socket = io();
@@ -811,12 +868,6 @@ export default function App() {
         setTimeout(() => fetchHeatmap(retries - 1), 2000);
       }
     }
-  };
-
-  const calculatePL = (order: Signal) => {
-    const currentPrice = prices['XAUUSD']?.close || order.entry_price;
-    const diff = order.type === 'Buy' ? currentPrice - order.entry_price : order.entry_price - currentPrice;
-    return diff * (order.lot_size || 0.1) * 100;
   };
 
   const totalPL = activeOrders.reduce((acc, order) => acc + calculatePL(order), 0);
@@ -1033,6 +1084,21 @@ export default function App() {
                     <Clock size={16} />
                   </button>
                   <div className="w-[1px] h-4 bg-white/10 mx-1" />
+                  <div className="flex bg-white/5 rounded-lg p-1 mr-2">
+                    <button 
+                      onClick={() => setChartType('ai')}
+                      className={`px-2 py-1 rounded-md text-[9px] font-bold transition-all ${chartType === 'ai' ? 'bg-white text-black' : 'text-white/40'}`}
+                    >
+                      AI
+                    </button>
+                    <button 
+                      onClick={() => setChartType('mt5')}
+                      className={`px-2 py-1 rounded-md text-[9px] font-bold transition-all ${chartType === 'mt5' ? 'bg-white text-black' : 'text-white/40'}`}
+                    >
+                      MT5
+                    </button>
+                  </div>
+                  <div className="w-[1px] h-4 bg-white/10 mx-1" />
                   <button 
                     onClick={() => setActiveTool(activeTool === 'crosshair' ? null : 'crosshair')}
                     className={`p-2 rounded-lg transition-all ${activeTool === 'crosshair' ? 'bg-white text-black' : 'text-white/40 hover:text-white'}`}
@@ -1075,48 +1141,52 @@ export default function App() {
                 </div>
                 
                 <div className="relative">
-                  <CandlestickChart 
-                    data={chartData} 
-                    indicators={indicators} 
-                    activeTool={activeTool}
-                    fibLevels={fibLevels}
-                    activeOrders={activeOrders}
-                    timeframe={timeframe}
-                    onChartClick={(param) => {
-                      if (activeTool === 'hline') {
-                        setActiveTool(null);
-                      } else if (activeTool === 'fib') {
-                        if (!fibPoints || (fibPoints.start && fibPoints.end)) {
-                          setFibPoints({ start: { price: param.price, time: param.time }, end: null });
-                          setFibLevels([]);
-                        } else {
-                          const startPrice = fibPoints.start.price;
-                          const endPrice = param.price;
-                          const diff = startPrice - endPrice;
-                          
-                          const ratios = [
-                            { r: 0, label: '0.0%', color: '#ef4444' },
-                            { r: 0.236, label: '23.6%', color: '#f59e0b' },
-                            { r: 0.382, label: '38.2%', color: '#10b981' },
-                            { r: 0.5, label: '50.0%', color: '#3b82f6' },
-                            { r: 0.618, label: '61.8%', color: '#8b5cf6' },
-                            { r: 0.786, label: '78.6%', color: '#ec4899' },
-                            { r: 1, label: '100.0%', color: '#ffffff' },
-                          ];
-
-                          const levels = ratios.map(ratio => ({
-                            price: startPrice - (diff * ratio.r),
-                            label: ratio.label,
-                            color: ratio.color
-                          }));
-
-                          setFibLevels(levels);
-                          setFibPoints({ ...fibPoints, end: { price: param.price, time: param.time } });
+                  {chartType === 'ai' ? (
+                    <CandlestickChart 
+                      data={chartData} 
+                      indicators={indicators} 
+                      activeTool={activeTool}
+                      fibLevels={fibLevels}
+                      activeOrders={activeOrders}
+                      timeframe={timeframe}
+                      onChartClick={(param) => {
+                        if (activeTool === 'hline') {
                           setActiveTool(null);
+                        } else if (activeTool === 'fib') {
+                          if (!fibPoints || (fibPoints.start && fibPoints.end)) {
+                            setFibPoints({ start: { price: param.price, time: param.time }, end: null });
+                            setFibLevels([]);
+                          } else {
+                            const startPrice = fibPoints.start.price;
+                            const endPrice = param.price;
+                            const diff = startPrice - endPrice;
+                            
+                            const ratios = [
+                              { r: 0, label: '0.0%', color: '#ef4444' },
+                              { r: 0.236, label: '23.6%', color: '#f59e0b' },
+                              { r: 0.382, label: '38.2%', color: '#10b981' },
+                              { r: 0.5, label: '50.0%', color: '#3b82f6' },
+                              { r: 0.618, label: '61.8%', color: '#8b5cf6' },
+                              { r: 0.786, label: '78.6%', color: '#ec4899' },
+                              { r: 1, label: '100.0%', color: '#ffffff' },
+                            ];
+
+                            const levels = ratios.map(ratio => ({
+                              price: startPrice - (diff * ratio.r),
+                              label: ratio.label,
+                              color: ratio.color
+                            }));
+
+                            setFibLevels(levels);
+                            setFibPoints({ ...fibPoints, end: { price: param.price, time: param.time } });
+                            setActiveTool(null);
+                          }
                         }
-                      }
-                    }}
-                  />
+                      }}
+                    />
+                  ) : (
+                    <MetaTraderChart />
+                  )}
                   {isChangingTimeframe && (
                     <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px] flex items-center justify-center z-20 rounded-3xl">
                       <div className="flex flex-col items-center gap-3">
@@ -1190,21 +1260,19 @@ export default function App() {
                   <span className="text-[10px] uppercase tracking-widest font-bold text-white/40">Terminal Log</span>
                 </div>
                 <div className="space-y-3 font-mono text-[9px]">
-                  <div className="flex gap-3">
-                    <span className="text-white/20">12:45:12</span>
-                    <span className="text-emerald-400">[SYSTEM]</span>
-                    <span className="text-white/60">AI Engine synchronized with OANDA liquidity...</span>
-                  </div>
-                  <div className="flex gap-3">
-                    <span className="text-white/20">12:44:05</span>
-                    <span className="text-amber-400">[SIGNAL]</span>
-                    <span className="text-white/60">New Bullish divergence detected on M15 timeframe.</span>
-                  </div>
-                  <div className="flex gap-3">
-                    <span className="text-white/20">12:42:30</span>
-                    <span className="text-white/40">[INFO]</span>
-                    <span className="text-white/60">Risk parameters updated to 1.5% per trade.</span>
-                  </div>
+                  {terminalLogs.map((log, idx) => (
+                    <div key={idx} className="flex gap-3">
+                      <span className="text-white/20">{log.time}</span>
+                      <span className={
+                        log.type === 'SYSTEM' ? 'text-emerald-400' : 
+                        log.type === 'SIGNAL' ? 'text-amber-400' : 
+                        log.type === 'PROFIT' ? 'text-emerald-400' :
+                        log.type === 'LOSS' ? 'text-red-400' :
+                        'text-white/40'
+                      }>[{log.type}]</span>
+                      <span className="text-white/60">{log.message}</span>
+                    </div>
+                  ))}
                 </div>
               </div>
 
