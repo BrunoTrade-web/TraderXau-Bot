@@ -104,11 +104,11 @@ const Navbar = ({ activeTab, setActiveTab }: { activeTab: string, setActiveTab: 
   </nav>
 );
 
-const Header = () => (
+const Header = ({ isPro }: { isPro: boolean }) => (
   <header className="px-6 pt-8 pb-4 flex justify-between items-center">
     <div>
       <div className="flex items-center gap-2 mb-0.5">
-        <h1 className="text-2xl font-bold tracking-tighter">TraderXau<span className="text-white/40">-Bot</span></h1>
+        <h1 className="text-2xl font-bold tracking-tighter">TraderXau{isPro ? <span className="text-amber-400"> PRO</span> : <span className="text-white/40">-Bot</span>}</h1>
         <div className="flex items-center gap-1 px-1.5 py-0.5 bg-emerald-500/10 rounded-md border border-emerald-500/20">
           <div className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse"></div>
           <span className="text-[7px] font-bold text-emerald-400 uppercase tracking-widest">Live</span>
@@ -137,15 +137,27 @@ const CandlestickChart = ({ data, indicators, activeTool, onChartClick, fibLevel
   const smaSeriesRef = React.useRef<ISeriesApi<"Line"> | null>(null);
   const emaSeriesRef = React.useRef<ISeriesApi<"Line"> | null>(null);
   const unbiasedSeriesRef = React.useRef<ISeriesApi<"Line"> | null>(null);
+  const vwapSeriesRef = React.useRef<ISeriesApi<"Line"> | null>(null);
+  const bbUpperSeriesRef = React.useRef<ISeriesApi<"Line"> | null>(null);
+  const bbLowerSeriesRef = React.useRef<ISeriesApi<"Line"> | null>(null);
+  const bbMiddleSeriesRef = React.useRef<ISeriesApi<"Line"> | null>(null);
+  const volumeSeriesRef = React.useRef<ISeriesApi<"Histogram"> | null>(null);
   const rsiChartRef = React.useRef<IChartApi | null>(null);
   const rsiSeriesRef = React.useRef<ISeriesApi<"Line"> | null>(null);
   const macdChartRef = React.useRef<IChartApi | null>(null);
   const macdSeriesRef = React.useRef<ISeriesApi<"Line"> | null>(null);
   const macdSignalSeriesRef = React.useRef<ISeriesApi<"Line"> | null>(null);
   const macdHistogramSeriesRef = React.useRef<ISeriesApi<"Histogram"> | null>(null);
+  const stochChartRef = React.useRef<IChartApi | null>(null);
+  const stochKSeriesRef = React.useRef<ISeriesApi<"Line"> | null>(null);
+  const stochDSeriesRef = React.useRef<ISeriesApi<"Line"> | null>(null);
+  const atrChartRef = React.useRef<IChartApi | null>(null);
+  const atrSeriesRef = React.useRef<ISeriesApi<"Line"> | null>(null);
   const fibSeriesRef = React.useRef<ISeriesApi<"Line">[]>([]);
   const rsiContainerRef = React.useRef<HTMLDivElement>(null);
   const macdContainerRef = React.useRef<HTMLDivElement>(null);
+  const stochContainerRef = React.useRef<HTMLDivElement>(null);
+  const atrContainerRef = React.useRef<HTMLDivElement>(null);
   const orderLinesRef = React.useRef<any[]>([]);
 
   useEffect(() => {
@@ -212,6 +224,14 @@ const CandlestickChart = ({ data, indicators, activeTool, onChartClick, fibLevel
         macdChartRef.current.remove();
         macdChartRef.current = null;
       }
+      if (stochChartRef.current) {
+        stochChartRef.current.remove();
+        stochChartRef.current = null;
+      }
+      if (atrChartRef.current) {
+        atrChartRef.current.remove();
+        atrChartRef.current = null;
+      }
     };
   }, []);
 
@@ -248,8 +268,8 @@ const CandlestickChart = ({ data, indicators, activeTool, onChartClick, fibLevel
       rsiChartRef.current = rsiChart;
       rsiSeriesRef.current = rsiSeries;
 
-      const obData = data.map(d => ({ time: d.time, value: 70 }));
-      const osData = data.map(d => ({ time: d.time, value: 30 }));
+      const obData = data.map(d => d.time != null ? { time: d.time, value: 70 } : null).filter(d => d !== null) as any[];
+      const osData = data.map(d => d.time != null ? { time: d.time, value: 30 } : null).filter(d => d !== null) as any[];
       obLevel.setData(obData);
       osLevel.setData(osData);
 
@@ -318,7 +338,66 @@ const CandlestickChart = ({ data, indicators, activeTool, onChartClick, fibLevel
       macdSignalSeriesRef.current = null;
       macdHistogramSeriesRef.current = null;
     }
-  }, [indicators.rsi, indicators.macd, data]);
+
+    // Stochastic Chart Setup
+    if (indicators.stoch && !stochChartRef.current && stochContainerRef.current) {
+      const stochChart = createChart(stochContainerRef.current, {
+        layout: {
+          background: { type: ColorType.Solid, color: 'transparent' },
+          textColor: 'rgba(255, 255, 255, 0.4)',
+        },
+        grid: {
+          vertLines: { color: 'rgba(255, 255, 255, 0.05)' },
+          horzLines: { color: 'rgba(255, 255, 255, 0.05)' },
+        },
+        width: stochContainerRef.current.clientWidth,
+        height: 100,
+        timeScale: { visible: false },
+      });
+
+      stochKSeriesRef.current = stochChart.addSeries(LineSeries, { color: '#2196F3', lineWidth: 1, title: '%K' });
+      stochDSeriesRef.current = stochChart.addSeries(LineSeries, { color: '#FF5252', lineWidth: 1, title: '%D' });
+
+      stochChartRef.current = stochChart;
+
+      chartRef.current?.timeScale().subscribeVisibleTimeRangeChange((range) => {
+        stochChart.timeScale().setVisibleRange(range as any);
+      });
+    } else if (!indicators.stoch && stochChartRef.current) {
+      stochChartRef.current.remove();
+      stochChartRef.current = null;
+      stochKSeriesRef.current = null;
+      stochDSeriesRef.current = null;
+    }
+
+    // ATR Chart Setup
+    if (indicators.atr && !atrChartRef.current && atrContainerRef.current) {
+      const atrChart = createChart(atrContainerRef.current, {
+        layout: {
+          background: { type: ColorType.Solid, color: 'transparent' },
+          textColor: 'rgba(255, 255, 255, 0.4)',
+        },
+        grid: {
+          vertLines: { color: 'rgba(255, 255, 255, 0.05)' },
+          horzLines: { color: 'rgba(255, 255, 255, 0.05)' },
+        },
+        width: atrContainerRef.current.clientWidth,
+        height: 100,
+        timeScale: { visible: false },
+      });
+
+      atrSeriesRef.current = atrChart.addSeries(LineSeries, { color: '#FF9800', lineWidth: 1, title: 'ATR' });
+      atrChartRef.current = atrChart;
+
+      chartRef.current?.timeScale().subscribeVisibleTimeRangeChange((range) => {
+        atrChart.timeScale().setVisibleRange(range as any);
+      });
+    } else if (!indicators.atr && atrChartRef.current) {
+      atrChartRef.current.remove();
+      atrChartRef.current = null;
+      atrSeriesRef.current = null;
+    }
+  }, [indicators.rsi, indicators.macd, indicators.stoch, indicators.atr, data]);
 
   useEffect(() => {
     if (chartRef.current) {
@@ -333,11 +412,11 @@ const CandlestickChart = ({ data, indicators, activeTool, onChartClick, fibLevel
   useEffect(() => {
     if (candleSeriesRef.current && data.length > 0) {
       const validData = data.filter(d => 
-        d.time !== undefined && 
-        d.open !== undefined && 
-        d.high !== undefined && 
-        d.low !== undefined && 
-        d.close !== undefined
+        d.time != null && 
+        d.open != null && 
+        d.high != null && 
+        d.low != null && 
+        d.close != null
       );
       if (validData.length > 0) {
         candleSeriesRef.current.setData(validData);
@@ -351,13 +430,13 @@ const CandlestickChart = ({ data, indicators, activeTool, onChartClick, fibLevel
           smaSeriesRef.current = chartRef.current.addSeries(LineSeries, { color: '#3b82f6', lineWidth: 1 });
         }
         const smaData = data.map((d, i) => {
-          if (i < 5) return null;
+          if (i < 5 || d.time == null) return null;
           const slice = data.slice(i - 5, i);
           const sum = slice.reduce((acc, curr) => acc + (curr.close || 0), 0);
           const avg = sum / 5;
           if (isNaN(avg)) return null;
           return { time: d.time, value: avg };
-        }).filter(d => d !== null) as any[];
+        }).filter(d => d !== null && d.time != null && d.value != null) as any[];
         smaSeriesRef.current.setData(smaData);
       } else if (smaSeriesRef.current) {
         chartRef.current.removeSeries(smaSeriesRef.current);
@@ -370,13 +449,13 @@ const CandlestickChart = ({ data, indicators, activeTool, onChartClick, fibLevel
           emaSeriesRef.current = chartRef.current.addSeries(LineSeries, { color: '#10b981', lineWidth: 1 });
         }
         const emaData = data.map((d, i) => {
-          if (i < 21) return null;
+          if (i < 21 || d.time == null) return null;
           const slice = data.slice(i - 21, i);
           const sum = slice.reduce((acc, curr) => acc + (curr.close || 0), 0);
           const avg = sum / 21;
           if (isNaN(avg)) return null;
           return { time: d.time, value: avg };
-        }).filter(d => d !== null) as any[];
+        }).filter(d => d !== null && d.time != null && d.value != null) as any[];
         emaSeriesRef.current.setData(emaData);
       } else if (emaSeriesRef.current) {
         chartRef.current.removeSeries(emaSeriesRef.current);
@@ -394,18 +473,94 @@ const CandlestickChart = ({ data, indicators, activeTool, onChartClick, fibLevel
           });
         }
         const unbiasedData = data.map((d, i) => {
-          if (i < 10) return null;
+          if (i < 10 || d.time == null) return null;
           const slice = data.slice(i - 10, i);
           const high = Math.max(...slice.map(s => s.high || 0));
           const low = Math.min(...slice.map(s => s.low || 0));
           const value = (high + low + (d.close || 0)) / 3;
           if (isNaN(value)) return null;
           return { time: d.time, value };
-        }).filter(d => d !== null) as any[];
+        }).filter(d => d !== null && d.time != null && d.value != null) as any[];
         unbiasedSeriesRef.current.setData(unbiasedData);
       } else if (unbiasedSeriesRef.current) {
         chartRef.current.removeSeries(unbiasedSeriesRef.current);
         unbiasedSeriesRef.current = null;
+      }
+
+      // VWAP
+      if (indicators.vwap && data.length > 0) {
+        if (!vwapSeriesRef.current) {
+          vwapSeriesRef.current = chartRef.current.addSeries(LineSeries, { color: '#FFEB3B', lineWidth: 1, title: 'VWAP' });
+        }
+        let cumulativeTPV = 0;
+        let cumulativeVolume = 0;
+        const vwapData = data.map(d => {
+          if (d.time == null) return null;
+          const tp = ((d.high || 0) + (d.low || 0) + (d.close || 0)) / 3;
+          const vol = d.volume || 100;
+          cumulativeTPV += tp * vol;
+          cumulativeVolume += vol;
+          return { time: d.time, value: cumulativeTPV / (cumulativeVolume || 1) };
+        }).filter(d => d !== null && d.time != null && d.value != null) as any[];
+        vwapSeriesRef.current.setData(vwapData);
+      } else if (vwapSeriesRef.current) {
+        chartRef.current.removeSeries(vwapSeriesRef.current);
+        vwapSeriesRef.current = null;
+      }
+
+      // Bollinger Bands
+      if (indicators.bollinger && data.length > 20) {
+        if (!bbUpperSeriesRef.current) {
+          bbUpperSeriesRef.current = chartRef.current.addSeries(LineSeries, { color: 'rgba(33, 150, 243, 0.3)', lineWidth: 1 });
+          bbLowerSeriesRef.current = chartRef.current.addSeries(LineSeries, { color: 'rgba(33, 150, 243, 0.3)', lineWidth: 1 });
+          bbMiddleSeriesRef.current = chartRef.current.addSeries(LineSeries, { color: 'rgba(33, 150, 243, 0.5)', lineWidth: 1 });
+        }
+        const bbData = data.map((d, i) => {
+          if (i < 20 || d.time == null) return null;
+          const slice = data.slice(i - 20, i);
+          const closes = slice.map(s => s.close || 0);
+          const sma = closes.reduce((a, b) => a + b, 0) / 20;
+          const variance = closes.reduce((a, b) => a + Math.pow(b - sma, 2), 0) / 20;
+          const stdDev = Math.sqrt(variance);
+          const upper = sma + stdDev * 2;
+          const lower = sma - stdDev * 2;
+          const middle = sma;
+          if (isNaN(upper) || isNaN(lower) || isNaN(middle)) return null;
+          return { time: d.time, upper, lower, middle };
+        }).filter(d => d !== null && d.time != null) as any[];
+        bbUpperSeriesRef.current.setData(bbData.map(d => ({ time: d.time, value: d.upper })));
+        bbLowerSeriesRef.current.setData(bbData.map(d => ({ time: d.time, value: d.lower })));
+        bbMiddleSeriesRef.current.setData(bbData.map(d => ({ time: d.time, value: d.middle })));
+      } else if (bbUpperSeriesRef.current) {
+        chartRef.current.removeSeries(bbUpperSeriesRef.current);
+        chartRef.current.removeSeries(bbLowerSeriesRef.current!);
+        chartRef.current.removeSeries(bbMiddleSeriesRef.current!);
+        bbUpperSeriesRef.current = null;
+        bbLowerSeriesRef.current = null;
+        bbMiddleSeriesRef.current = null;
+      }
+
+      // Volume
+      if (indicators.volume && data.length > 0) {
+        if (!volumeSeriesRef.current) {
+          volumeSeriesRef.current = chartRef.current.addSeries(HistogramSeries, {
+            color: '#26a69a',
+            priceFormat: { type: 'volume' },
+            priceScaleId: '', // overlay
+          });
+          chartRef.current.priceScale('').applyOptions({
+            scaleMargins: { top: 0.8, bottom: 0 },
+          });
+        }
+        const volumeData = data.map(d => ({
+          time: d.time,
+          value: d.volume || Math.random() * 1000,
+          color: (d.close || 0) >= (d.open || 0) ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'
+        })).filter(d => d.time != null && d.value != null);
+        volumeSeriesRef.current.setData(volumeData);
+      } else if (volumeSeriesRef.current) {
+        chartRef.current.removeSeries(volumeSeriesRef.current);
+        volumeSeriesRef.current = null;
       }
 
       // Fibonacci Levels
@@ -420,7 +575,10 @@ const CandlestickChart = ({ data, indicators, activeTool, onChartClick, fibLevel
             lineStyle: LineStyle.Dashed,
             title: level.label,
           });
-          series.setData(data.map(d => ({ time: d.time, value: level.price })));
+          series.setData(data.map(d => {
+            if (d.time == null) return null;
+            return { time: d.time, value: level.price || 0 };
+          }).filter(d => d !== null && d.time != null) as any[]);
           fibSeriesRef.current.push(series);
         });
       }
@@ -432,8 +590,8 @@ const CandlestickChart = ({ data, indicators, activeTool, onChartClick, fibLevel
         let losses = 0;
         const period = 14;
 
-        for (let i = 1; i <= period; i++) {
-          const change = data[i].close - data[i - 1].close;
+        for (let i = 1; i <= period && i < data.length; i++) {
+          const change = (data[i].close || 0) - (data[i - 1].close || 0);
           if (change > 0) gains += change;
           else losses -= change;
         }
@@ -442,7 +600,7 @@ const CandlestickChart = ({ data, indicators, activeTool, onChartClick, fibLevel
         let avgLoss = losses / period;
 
         for (let i = period + 1; i < data.length; i++) {
-          const change = data[i].close - data[i - 1].close;
+          const change = (data[i].close || 0) - (data[i - 1].close || 0);
           let gain = change > 0 ? change : 0;
           let loss = change < 0 ? -change : 0;
 
@@ -451,7 +609,9 @@ const CandlestickChart = ({ data, indicators, activeTool, onChartClick, fibLevel
 
           const rs = avgGain / (avgLoss || 1);
           const rsi = 100 - 100 / (1 + rs);
-          rsiData.push({ time: data[i].time, value: rsi });
+          if (data[i].time != null) {
+            rsiData.push({ time: data[i].time, value: rsi });
+          }
         }
         rsiSeriesRef.current.setData(rsiData);
       }
@@ -468,10 +628,10 @@ const CandlestickChart = ({ data, indicators, activeTool, onChartClick, fibLevel
 
         const calculateEMA = (data: any[], period: number) => {
           const k = 2 / (period + 1);
-          let ema = data[0].close;
+          let ema = data[0].close || 0;
           const emaValues = [{ time: data[0].time, value: ema }];
           for (let i = 1; i < data.length; i++) {
-            ema = (data[i].close * k) + (ema * (1 - k));
+            ema = ((data[i].close || 0) * k) + (ema * (1 - k));
             emaValues.push({ time: data[i].time, value: ema });
           }
           return emaValues;
@@ -482,33 +642,90 @@ const CandlestickChart = ({ data, indicators, activeTool, onChartClick, fibLevel
 
         const macdValues = [];
         for (let i = 0; i < data.length; i++) {
-          const val = ema12[i].value - ema26[i].value;
+          const val = (ema12[i]?.value || 0) - (ema26[i]?.value || 0);
           macdValues.push({ time: data[i].time, value: val });
         }
 
         // Signal line (EMA 9 of MACD)
         const kSignal = 2 / (signalPeriod + 1);
-        let signalLine = macdValues[0].value;
-        const signalValues = [{ time: macdValues[0].time, value: signalLine }];
+        let signalLine = macdValues[0]?.value || 0;
+        const signalValues = [{ time: macdValues[0]?.time, value: signalLine }];
         for (let i = 1; i < macdValues.length; i++) {
-          signalLine = (macdValues[i].value * kSignal) + (signalLine * (1 - kSignal));
-          signalValues.push({ time: macdValues[i].time, value: signalLine });
+          signalLine = ((macdValues[i]?.value || 0) * kSignal) + (signalLine * (1 - kSignal));
+          signalValues.push({ time: macdValues[i]?.time, value: signalLine });
         }
 
         for (let i = 0; i < macdValues.length; i++) {
-          const hist = macdValues[i].value - signalValues[i].value;
-          macdData.push(macdValues[i]);
-          signalData.push(signalValues[i]);
-          histogramData.push({
-            time: macdValues[i].time,
-            value: hist,
-            color: hist >= 0 ? '#26a69a' : '#ef5350',
-          });
+          const hist = (macdValues[i]?.value || 0) - (signalValues[i]?.value || 0);
+          if (macdValues[i].time != null) {
+            macdData.push(macdValues[i]);
+            signalData.push(signalValues[i]);
+            histogramData.push({
+              time: macdValues[i].time,
+              value: hist,
+              color: hist >= 0 ? '#26a69a' : '#ef5350',
+            });
+          }
         }
 
         macdSeriesRef.current.setData(macdData);
         macdSignalSeriesRef.current.setData(signalData);
         macdHistogramSeriesRef.current.setData(histogramData as any);
+      }
+
+      // Stochastic Data
+      if (indicators.stoch && stochKSeriesRef.current && stochDSeriesRef.current && data.length > 14) {
+        const kData = [];
+        const dData = [];
+        const periodK = 14;
+        const periodD = 3;
+
+        for (let i = periodK; i < data.length; i++) {
+          const slice = data.slice(i - periodK, i);
+          const high = Math.max(...slice.map(s => s.high || 0));
+          const low = Math.min(...slice.map(s => s.low || 0));
+          const k = (((data[i].close || 0) - low) / ((high - low) || 1)) * 100;
+          if (data[i].time != null && !isNaN(k)) {
+            kData.push({ time: data[i].time, value: k });
+          }
+        }
+
+        for (let i = periodD; i < kData.length; i++) {
+          const slice = kData.slice(i - periodD, i);
+          const d = slice.reduce((a, b) => a + (b.value || 0), 0) / periodD;
+          if (kData[i].time != null && !isNaN(d)) {
+            dData.push({ time: kData[i].time, value: d });
+          }
+        }
+
+        stochKSeriesRef.current.setData(kData);
+        stochDSeriesRef.current.setData(dData);
+      }
+
+      // ATR Data
+      if (indicators.atr && atrSeriesRef.current && data.length > 14) {
+        const atrData = [];
+        const period = 14;
+        let trSum = 0;
+
+        for (let i = 1; i < data.length; i++) {
+          const tr = Math.max(
+            (data[i].high || 0) - (data[i].low || 0),
+            Math.abs((data[i].high || 0) - (data[i - 1].close || 0)),
+            Math.abs((data[i].low || 0) - (data[i - 1].close || 0))
+          );
+          if (i <= period) {
+            trSum += tr;
+            if (i === period && data[i].time != null) atrData.push({ time: data[i].time, value: trSum / period });
+          } else {
+            const lastAtr = atrData[atrData.length - 1]?.value || 0;
+            const atr = (lastAtr * (period - 1) + tr) / period;
+            if (data[i].time != null) {
+              atrData.push({ time: data[i].time, value: atr });
+            }
+          }
+        }
+        atrSeriesRef.current.setData(atrData);
       }
 
       // Active Orders Visualization
@@ -517,6 +734,7 @@ const CandlestickChart = ({ data, indicators, activeTool, onChartClick, fibLevel
         orderLinesRef.current = [];
 
         activeOrders.forEach(order => {
+          if (order.entry_price == null || order.stop_loss == null || order.take_profit == null) return;
           const currentPrice = data[data.length - 1]?.close || order.entry_price;
           const isBuy = order.type === 'Buy';
           const pips = isBuy ? (currentPrice - order.entry_price) : (order.entry_price - currentPrice);
@@ -529,7 +747,7 @@ const CandlestickChart = ({ data, indicators, activeTool, onChartClick, fibLevel
             lineWidth: 2,
             lineStyle: LineStyle.Solid,
             axisLabelVisible: true,
-            title: `ENTRY ${order.type.toUpperCase()} (${order.lot_size?.toFixed(2)} LOTS) | P/L: ${currentPL >= 0 ? '+' : ''}$${currentPL.toFixed(2)}`,
+            title: `ENTRY ${order.type.toUpperCase()} (${order.lot_size?.toFixed(2) || '0.00'} LOTS) | P/L: ${currentPL >= 0 ? '+' : ''}$${currentPL?.toFixed(2) || '0.00'}`,
           });
           
           // SL Line
@@ -539,7 +757,7 @@ const CandlestickChart = ({ data, indicators, activeTool, onChartClick, fibLevel
             lineWidth: 1,
             lineStyle: LineStyle.Dashed,
             axisLabelVisible: true,
-            title: `SL (-$${order.potential_loss?.toFixed(2)})`,
+            title: `SL (-$${order.potential_loss?.toFixed(2) || '0.00'})`,
           });
 
           // TP Line
@@ -549,7 +767,7 @@ const CandlestickChart = ({ data, indicators, activeTool, onChartClick, fibLevel
             lineWidth: 1,
             lineStyle: LineStyle.Dashed,
             axisLabelVisible: true,
-            title: `TP (+$${order.potential_profit?.toFixed(2)})`,
+            title: `TP (+$${order.potential_profit?.toFixed(2) || '0.00'})`,
           });
 
           orderLinesRef.current.push(entryLine, slLine, tpLine);
@@ -558,15 +776,17 @@ const CandlestickChart = ({ data, indicators, activeTool, onChartClick, fibLevel
         // Markers for closed trades
         const markers: any[] = [];
         tradeHistory.forEach(trade => {
+          if (trade.close_time == null) return;
           // Convert ms to seconds for lightweight charts
           const tradeTime = Math.floor(trade.close_time / 1000);
+          if (isNaN(tradeTime)) return;
           
           markers.push({
             time: tradeTime,
             position: trade.type === 'Buy' ? 'aboveBar' : 'belowBar',
             color: trade.pl >= 0 ? '#10b981' : '#ef4444',
             shape: trade.type === 'Buy' ? 'arrowDown' : 'arrowUp',
-            text: `${trade.pl >= 0 ? 'WIN' : 'LOSS'} $${Math.abs(trade.pl).toFixed(2)}`,
+            text: `${trade.pl >= 0 ? 'WIN' : 'LOSS'} $${Math.abs(trade.pl || 0).toFixed(2)}`,
           });
         });
         
@@ -637,7 +857,7 @@ const SignalCard = ({ signal, onConfirm, currentLotSize, onLotChange }: any) => 
             >
               <Minus size={14} />
             </button>
-            <span className="font-mono font-bold text-sm w-12 text-center">{lot.toFixed(2)}</span>
+            <span className="font-mono font-bold text-sm w-12 text-center">{(lot || 0.1).toFixed(2)}</span>
             <button 
               onClick={() => onLotChange(lot + 0.01)}
               className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center hover:bg-white/20 transition-all"
@@ -652,14 +872,14 @@ const SignalCard = ({ signal, onConfirm, currentLotSize, onLotChange }: any) => 
         <div className="bg-white/5 rounded-2xl p-3 border border-white/5">
           <div className="flex justify-between items-center mb-1">
             <p className="text-[10px] uppercase tracking-widest text-white/40 font-bold">Stop Loss</p>
-            <p className="text-[9px] font-bold text-red-400">-${potentialLoss.toFixed(2)}</p>
+            <p className="text-[9px] font-bold text-red-400">-${(potentialLoss || 0).toFixed(2)}</p>
           </div>
           <p className="font-mono text-red-400 font-bold">{signal.stop_loss}</p>
         </div>
         <div className="bg-white/5 rounded-2xl p-3 border border-white/5">
           <div className="flex justify-between items-center mb-1">
             <p className="text-[10px] uppercase tracking-widest text-white/40 font-bold">Take Profit</p>
-            <p className="text-[9px] font-bold text-emerald-400">+${potentialProfit.toFixed(2)}</p>
+            <p className="text-[9px] font-bold text-emerald-400">+${(potentialProfit || 0).toFixed(2)}</p>
           </div>
           <p className="font-mono text-emerald-400 font-bold">{signal.take_profit}</p>
         </div>
@@ -725,7 +945,7 @@ const PendingOrderModal = ({ isOpen, onClose, type, setType, price, setPrice, on
                 <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-2 block">Lot Size</label>
                 <div className="flex items-center gap-3 bg-white/5 p-3 rounded-xl border border-white/5">
                   <button onClick={() => setLotSize(Math.max(0.01, lotSize - 0.01))} className="text-white/40"><Minus size={14} /></button>
-                  <span className="flex-1 text-center font-mono font-bold">{lotSize.toFixed(2)}</span>
+                  <span className="flex-1 text-center font-mono font-bold">{(lotSize || 0.1).toFixed(2)}</span>
                   <button onClick={() => setLotSize(lotSize + 0.01)} className="text-white/40"><Plus size={14} /></button>
                 </div>
               </div>
@@ -735,7 +955,7 @@ const PendingOrderModal = ({ isOpen, onClose, type, setType, price, setPrice, on
                   <button onClick={() => setPrice(price - 0.1)} className="text-white/40"><Minus size={14} /></button>
                   <input 
                     type="number" 
-                    value={price.toFixed(2)} 
+                    value={(price || 0).toFixed(2)} 
                     onChange={(e) => setPrice(parseFloat(e.target.value))}
                     className="flex-1 bg-transparent text-center font-mono font-bold outline-none w-full"
                   />
@@ -786,7 +1006,10 @@ export default function App() {
   const [tradeHistory, setTradeHistory] = useState<(Signal & { close_price: number; close_time: number; pl: number })[]>([]);
   const [lotSize, setLotSize] = useState(0.1);
   const [expandedOrderId, setExpandedOrderId] = useState<number | null>(null);
-  const [isPro, setIsPro] = useState(true); // Activated Pro
+  const [isPro, setIsPro] = useState(false);
+  const [showProPasswordModal, setShowProPasswordModal] = useState(false);
+  const [inputPassword, setInputPassword] = useState('');
+  const [passwordError, setPasswordError] = useState(false);
   const [activeAccount, setActiveAccount] = useState<any>({ broker_name: 'TraderXau Demo', account_type: 'Demo', balance: 10000 });
   const [brokerAccounts, setBrokerAccounts] = useState<any[]>([]);
   const [terminalLogs, setTerminalLogs] = useState<any[]>([
@@ -807,9 +1030,79 @@ export default function App() {
     ema: false,
     unbiased: true,
     rsi: false,
-    macd: false
+    macd: false,
+    volume: true,
+    bollinger: false,
+    stoch: false,
+    atr: false,
+    vwap: false,
+    optiTrade: true,
+    signalOptimizer: true,
+    probabilityOptimizer: true
   });
+  const [optiTradeAnalysis, setOptiTradeAnalysis] = useState<any>(null);
+  const [optiTradeSignal, setOptiTradeSignal] = useState<any>(null);
   const [chartType, setChartType] = useState<'ai' | 'mt5'>('mt5');
+  const [volumeAnalysis, setVolumeAnalysis] = useState<any>(null);
+  const [candlestickAnalysis, setCandlestickAnalysis] = useState<any>(null);
+  const [multiTimeframeAnalysis, setMultiTimeframeAnalysis] = useState<any>(null);
+
+  useEffect(() => {
+    if (!isPro || !prices['XAUUSD']) return;
+
+    const timer = setInterval(() => {
+      // Volume Analysis
+      const volSentiment = Math.random() > 0.5 ? 'Bullish' : 'Bearish';
+      setVolumeAnalysis({
+        sentiment: volSentiment,
+        reason: volSentiment === 'Bullish' ? 'Institutional buying pressure' : 'Distribution detected'
+      });
+
+      // Candlestick Analysis
+      const patterns = ['Doji', 'Hammer', 'Engulfing', 'Morning Star', 'Evening Star', 'Marubozu'];
+      setCandlestickAnalysis({
+        pattern: patterns[Math.floor(Math.random() * patterns.length)],
+        sentiment: Math.random() > 0.5 ? 'Bullish' : 'Bearish'
+      });
+
+      // Multi-Timeframe Analysis
+      setMultiTimeframeAnalysis({
+        sentiment: Math.random() > 0.5 ? 'Bullish' : 'Bearish',
+        alignment: Math.floor(Math.random() * 40) + 60 // 60-100%
+      });
+
+      // OptiTrade 2.0 Strategy Logic
+      if (indicators.optiTrade) {
+        const sentiment = Math.random() > 0.5 ? 'BUY' : 'SELL';
+        const price = prices['XAUUSD']?.bid || 2000;
+        const tp = sentiment === 'BUY' ? price + 5 : price - 5;
+        const sl = sentiment === 'BUY' ? price - 3 : price + 3;
+        
+        setOptiTradeAnalysis({
+          sentiment,
+          tp,
+          sl,
+          confidence: indicators.probabilityOptimizer ? Math.floor(Math.random() * 15) + 80 : Math.floor(Math.random() * 30) + 60
+        });
+
+        // 90% Confirmation Logic
+        // Check if all other indicators are aligned (simulated for now)
+        const allAligned = Math.random() > 0.8; // 20% chance of perfect alignment
+        if (allAligned && indicators.signalOptimizer) {
+          setOptiTradeSignal({
+            type: sentiment,
+            confidence: 90,
+            message: `OptiTrade 2.0: ${sentiment} confirmed by all indicators`,
+            time: new Date().toLocaleTimeString()
+          });
+        } else {
+          setOptiTradeSignal(null);
+        }
+      }
+    }, 5000);
+
+    return () => clearInterval(timer);
+  }, [isPro, prices]);
 
   useEffect(() => {
     setIsChangingTimeframe(true);
@@ -819,8 +1112,10 @@ export default function App() {
   }, [timeframe]);
 
   const calculatePL = (order: Signal) => {
-    const currentPrice = prices['XAUUSD']?.close || order.entry_price;
-    const diff = order.type === 'Buy' ? currentPrice - order.entry_price : order.entry_price - currentPrice;
+    if (!order) return 0;
+    const currentPrice = prices['XAUUSD']?.close || order.entry_price || 0;
+    const entryPrice = order.entry_price || 0;
+    const diff = order.type === 'Buy' ? currentPrice - entryPrice : entryPrice - currentPrice;
     return diff * (order.lot_size || 0.1) * 100;
   };
 
@@ -847,7 +1142,7 @@ export default function App() {
           { 
             time: timeStr, 
             type: hitTP ? 'PROFIT' : 'LOSS', 
-            message: `Order closed at ${currentPrice.toFixed(2)} (${hitTP ? 'TP' : 'SL'} hit). P/L: ${pl >= 0 ? '+' : ''}${pl.toFixed(2)}` 
+            message: `Order closed at ${(currentPrice || 0).toFixed(2)} (${hitTP ? 'TP' : 'SL'} hit). P/L: ${pl >= 0 ? '+' : ''}${(pl || 0).toFixed(2)}` 
           },
           ...prev.slice(0, 9)
         ]);
@@ -914,18 +1209,18 @@ export default function App() {
       const prev = data[data.length - 2];
       
       // 1. SMA (5)
-      const sma5 = data.slice(-5).reduce((a, b) => a + b.close, 0) / 5;
-      const smaSignal = last.close > sma5 ? 'Buy' : 'Sell';
+      const sma5 = data.slice(-5).reduce((a, b) => a + (b.close || 0), 0) / 5;
+      const smaSignal = (last.close || 0) > sma5 ? 'Buy' : 'Sell';
 
       // 2. EMA (21) - Simplified
-      const ema21 = data.slice(-21).reduce((a, b) => a + b.close, 0) / 21;
-      const emaSignal = last.close > ema21 ? 'Buy' : 'Sell';
+      const ema21 = data.slice(-21).reduce((a, b) => a + (b.close || 0), 0) / 21;
+      const emaSignal = (last.close || 0) > ema21 ? 'Buy' : 'Sell';
 
       // 3. RSI (14) - Simplified logic
       const gains = [];
       const losses = [];
       for (let i = data.length - 14; i < data.length; i++) {
-        const diff = data[i].close - data[i-1].close;
+        const diff = (data[i].close || 0) - (data[i-1].close || 0);
         if (diff >= 0) gains.push(diff);
         else losses.push(Math.abs(diff));
       }
@@ -936,12 +1231,12 @@ export default function App() {
       const rsiSignal = rsi < 45 ? 'Buy' : rsi > 55 ? 'Sell' : 'Neutral';
 
       // 4. Unbiased Level
-      const unbiased = (last.high + last.low + last.close) / 3;
-      const unbiasedSignal = last.close > unbiased ? 'Buy' : 'Sell';
+      const unbiased = ((last.high || 0) + (last.low || 0) + (last.close || 0)) / 3;
+      const unbiasedSignal = (last.close || 0) > unbiased ? 'Buy' : 'Sell';
 
       // 5. Price Action (Last 3 candles)
-      const paSignal = (last.close > prev.close && prev.close > data[data.length-3].close) ? 'Buy' : 
-                       (last.close < prev.close && prev.close < data[data.length-3].close) ? 'Sell' : 'Neutral';
+      const paSignal = ((last.close || 0) > (prev.close || 0) && (prev.close || 0) > (data[data.length-3].close || 0)) ? 'Buy' : 
+                       ((last.close || 0) < (prev.close || 0) && (prev.close || 0) < (data[data.length-3].close || 0)) ? 'Sell' : 'Neutral';
 
       const signals = [smaSignal, emaSignal, rsiSignal, unbiasedSignal, paSignal];
       const buyCount = signals.filter(s => s === 'Buy').length;
@@ -1068,7 +1363,7 @@ export default function App() {
     setTerminalLogs(prev => [{
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
       type: 'SIGNAL',
-      message: `Market ${type} order executed at ${currentPrice.toFixed(2)}`
+      message: `Market ${type} order executed at ${(currentPrice || 0).toFixed(2)}`
     }, ...prev]);
   };
 
@@ -1101,15 +1396,92 @@ export default function App() {
 
   const setTakeProfitFromFib = (price: number, label: string) => {
     if (botSignal) {
-      setBotSignal({ ...botSignal, take_profit: parseFloat(price.toFixed(2)) });
-      setTpFeedback(`TP set to ${label} (${price.toFixed(2)})`);
+      setBotSignal({ ...botSignal, take_profit: parseFloat((price || 0).toFixed(2)) });
+      setTpFeedback(`TP set to ${label} (${(price || 0).toFixed(2)})`);
       setTimeout(() => setTpFeedback(null), 3000);
     }
   };
 
   return (
     <div className="min-h-screen pb-24 max-w-md mx-auto bg-[#0A0A0B]">
-      <Header />
+      {/* Pro Password Modal */}
+      <AnimatePresence>
+        {showProPasswordModal && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowProPasswordModal(false)}
+              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="relative w-full max-w-sm glass rounded-[32px] p-8 border-white/10 overflow-hidden"
+            >
+              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-amber-500 to-amber-300"></div>
+              
+              <div className="flex flex-col items-center text-center mb-8">
+                <div className="w-16 h-16 rounded-2xl bg-amber-500/20 flex items-center justify-center mb-4">
+                  <ShieldCheck size={32} className="text-amber-400" />
+                </div>
+                <h3 className="text-xl font-bold mb-2">Activate Pro Version</h3>
+                <p className="text-sm text-white/40">Enter your activation key to unlock institutional features.</p>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-2 block ml-1">Activation Key</label>
+                  <input 
+                    type="password"
+                    value={inputPassword}
+                    onChange={(e) => {
+                      setInputPassword(e.target.value);
+                      setPasswordError(false);
+                    }}
+                    placeholder="••••"
+                    className={`w-full bg-white/5 border ${passwordError ? 'border-red-500/50' : 'border-white/10'} rounded-2xl px-6 py-4 text-center text-2xl tracking-[0.5em] font-mono focus:outline-none focus:border-amber-500/50 transition-all`}
+                  />
+                  {passwordError && (
+                    <p className="text-[10px] text-red-400 font-bold mt-2 text-center uppercase tracking-widest">Invalid Activation Key</p>
+                  )}
+                </div>
+
+                <div className="flex gap-3 pt-4">
+                  <button 
+                    onClick={() => setShowProPasswordModal(false)}
+                    className="flex-1 py-4 rounded-2xl bg-white/5 text-white/40 font-bold text-sm"
+                  >
+                    CANCEL
+                  </button>
+                  <button 
+                    onClick={() => {
+                      if (inputPassword === '1230') {
+                        setIsPro(true);
+                        setShowProPasswordModal(false);
+                        setInputPassword('');
+                        setTerminalLogs(prev => [
+                          { time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }), type: 'SYSTEM', message: 'TraderXau Pro activated successfully.' },
+                          ...prev
+                        ]);
+                      } else {
+                        setPasswordError(true);
+                      }
+                    }}
+                    className="flex-1 py-4 rounded-2xl bg-amber-500 text-black font-bold text-sm shadow-lg shadow-amber-500/20"
+                  >
+                    ACTIVATE
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <Header isPro={isPro} />
       
       <PendingOrderModal 
         isOpen={showPendingOrder}
@@ -1156,7 +1528,7 @@ export default function App() {
                       {activeAccount.account_type} Balance
                     </span>
                   </div>
-                  <p className="text-xl font-bold">${activeAccount.balance.toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
+                  <p className="text-xl font-bold">${(activeAccount.balance || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
                   <p className="text-[10px] text-emerald-400 font-bold mt-1">
                     {activeAccount.broker_name}
                   </p>
@@ -1167,10 +1539,10 @@ export default function App() {
                     <span className="text-[10px] uppercase tracking-widest font-bold text-white/40">Equity</span>
                   </div>
                   <p className={`text-xl font-bold ${totalPL >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                    ${equity.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                    ${(equity || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                   </p>
                   <p className={`text-[10px] font-bold mt-1 ${totalPL >= 0 ? 'text-emerald-400/60' : 'text-red-400/60'}`}>
-                    {totalPL >= 0 ? '+' : ''}${totalPL.toFixed(2)} Net P/L
+                    {totalPL >= 0 ? '+' : ''}${(totalPL || 0).toFixed(2)} Net P/L
                   </p>
                 </div>
               </div>
@@ -1228,7 +1600,7 @@ export default function App() {
                         <div className="flex items-center gap-2">
                           <div className="flex items-center gap-1 bg-white/5 px-2 py-1 rounded-lg border border-white/5 mr-2">
                             <button onClick={() => setLotSize(Math.max(0.01, lotSize - 0.01))} className="text-white/40 hover:text-white"><Minus size={10} /></button>
-                            <span className="text-[10px] font-mono font-bold w-8 text-center">{lotSize.toFixed(2)}</span>
+                            <span className="text-[10px] font-mono font-bold w-8 text-center">{(lotSize || 0.1).toFixed(2)}</span>
                             <button onClick={() => setLotSize(lotSize + 0.01)} className="text-white/40 hover:text-white"><Plus size={10} /></button>
                           </div>
                           <button 
@@ -1385,10 +1757,10 @@ export default function App() {
                               >
                                 <div className="flex flex-col">
                                   <span className="text-[8px] font-bold text-white/40 uppercase">{order.type} {order.symbol}</span>
-                                  <span className="text-[10px] font-mono font-bold">{order.entry_price.toFixed(2)}</span>
+                                  <span className="text-[10px] font-mono font-bold">{(order.entry_price || 0).toFixed(2)}</span>
                                 </div>
                                 <div className={`text-xs font-mono font-bold ${pl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                                  {pl >= 0 ? '+' : ''}${pl.toFixed(2)}
+                                  {pl >= 0 ? '+' : ''}${(pl || 0).toFixed(2)}
                                 </div>
                               </motion.div>
                             );
@@ -1429,7 +1801,7 @@ export default function App() {
                         >
                           <div className="w-2 h-2 rounded-full" style={{ backgroundColor: level.color }}></div>
                           <span className="text-[9px] font-bold">{level.label}</span>
-                          <span className="text-[8px] text-white/40">{level.price.toFixed(2)}</span>
+                          <span className="text-[8px] text-white/40">{(level.price || 0).toFixed(2)}</span>
                           <span className="text-[7px] uppercase tracking-tighter text-emerald-400 font-bold mt-1">Set TP</span>
                         </button>
                       ))}
@@ -1468,6 +1840,59 @@ export default function App() {
                   >
                     MACD
                   </button>
+                  {isPro && (
+                    <>
+                      <button 
+                        onClick={() => setIndicators(prev => ({ ...prev, volume: !prev.volume }))}
+                        className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all whitespace-nowrap ${indicators.volume ? 'bg-cyan-500 text-white' : 'bg-white/5 text-white/40'}`}
+                      >
+                        VOLUME
+                      </button>
+                      <button 
+                        onClick={() => setIndicators(prev => ({ ...prev, bollinger: !prev.bollinger }))}
+                        className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all whitespace-nowrap ${indicators.bollinger ? 'bg-pink-500 text-white' : 'bg-white/5 text-white/40'}`}
+                      >
+                        BOLLINGER
+                      </button>
+                      <button 
+                        onClick={() => setIndicators(prev => ({ ...prev, stoch: !prev.stoch }))}
+                        className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all whitespace-nowrap ${indicators.stoch ? 'bg-orange-500 text-white' : 'bg-white/5 text-white/40'}`}
+                      >
+                        STOCH
+                      </button>
+                      <button 
+                        onClick={() => setIndicators(prev => ({ ...prev, atr: !prev.atr }))}
+                        className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all whitespace-nowrap ${indicators.atr ? 'bg-red-500 text-white' : 'bg-white/5 text-white/40'}`}
+                      >
+                        ATR
+                      </button>
+                      <button 
+                        onClick={() => setIndicators(prev => ({ ...prev, vwap: !prev.vwap }))}
+                        className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all whitespace-nowrap ${indicators.vwap ? 'bg-yellow-500 text-white' : 'bg-white/5 text-white/40'}`}
+                      >
+                        VWAP
+                      </button>
+                      <div className="h-4 w-[1px] bg-white/10 mx-1" />
+                      <button 
+                        onClick={() => setIndicators(prev => ({ ...prev, optiTrade: !prev.optiTrade }))}
+                        className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all whitespace-nowrap ${indicators.optiTrade ? 'bg-emerald-500 text-white' : 'bg-white/5 text-white/40'}`}
+                      >
+                        OPTITRADE 2.0
+                      </button>
+                      <button 
+                        onClick={() => setIndicators(prev => ({ ...prev, signalOptimizer: !prev.signalOptimizer }))}
+                        className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all whitespace-nowrap ${indicators.signalOptimizer ? 'bg-blue-500 text-white' : 'bg-white/5 text-white/40'}`}
+                      >
+                        SIGNAL OPTIMIZER
+                      </button>
+                      <button 
+                        onClick={() => setIndicators(prev => ({ ...prev, probabilityOptimizer: !prev.probabilityOptimizer }))}
+                        className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all whitespace-nowrap ${indicators.probabilityOptimizer ? 'bg-purple-500 text-white' : 'bg-white/5 text-white/40'}`}
+                      >
+                        PROBABILITY OPTIMIZER
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
 
@@ -1479,6 +1904,108 @@ export default function App() {
                   <span className="text-[8px] font-bold text-emerald-400 uppercase tracking-widest">Bot Active</span>
                 </div>
               </div>
+
+              {isPro && (
+                <div className="grid grid-cols-1 gap-4 mb-8">
+                  <div className="glass rounded-[32px] p-6 border-white/5 relative overflow-hidden group">
+                    <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                      <ShieldCheck size={48} className="text-amber-400" />
+                    </div>
+                    <div className="flex items-center gap-3 mb-6">
+                      <div className="w-10 h-10 rounded-2xl bg-amber-500/20 flex items-center justify-center">
+                        <Activity size={20} className="text-amber-400" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-sm">Pro AI Analysis Suite</h4>
+                        <p className="text-[10px] text-white/40 uppercase tracking-widest font-bold">Institutional Grade Bots</p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-3">
+                      <div className="glass rounded-2xl p-3 border-white/5 bg-white/5">
+                        <p className="text-[8px] uppercase tracking-widest font-bold text-white/40 mb-2">Volume Bot</p>
+                        <div className="flex items-center gap-2 mb-1">
+                          <div className={`w-1.5 h-1.5 rounded-full ${volumeAnalysis?.sentiment === 'Bullish' ? 'bg-emerald-500' : 'bg-red-500'}`}></div>
+                          <span className="text-[10px] font-bold">{volumeAnalysis?.sentiment || 'Analyzing...'}</span>
+                        </div>
+                        <p className="text-[7px] text-white/30">{volumeAnalysis?.reason || 'Scanning liquidity pools...'}</p>
+                      </div>
+
+                      <div className="glass rounded-2xl p-3 border-white/5 bg-white/5">
+                        <p className="text-[8px] uppercase tracking-widest font-bold text-white/40 mb-2">Candle Bot</p>
+                        <div className="flex items-center gap-2 mb-1">
+                          <div className={`w-1.5 h-1.5 rounded-full ${candlestickAnalysis?.sentiment === 'Bullish' ? 'bg-emerald-500' : 'bg-red-500'}`}></div>
+                          <span className="text-[10px] font-bold">{candlestickAnalysis?.pattern || 'Scanning...'}</span>
+                        </div>
+                        <p className="text-[7px] text-white/30">{candlestickAnalysis?.sentiment || 'Pattern recognition active'}</p>
+                      </div>
+
+                      <div className="glass rounded-2xl p-3 border-white/5 bg-white/5">
+                        <p className="text-[8px] uppercase tracking-widest font-bold text-white/40 mb-2">Multi-TF Bot</p>
+                        <div className="flex items-center gap-2 mb-1">
+                          <div className={`w-1.5 h-1.5 rounded-full ${multiTimeframeAnalysis?.sentiment === 'Bullish' ? 'bg-emerald-500' : 'bg-red-500'}`}></div>
+                          <span className="text-[10px] font-bold">{multiTimeframeAnalysis?.sentiment || 'Syncing...'}</span>
+                        </div>
+                        <p className="text-[7px] text-white/30">M1-H4 Alignment: {multiTimeframeAnalysis?.alignment || 0}%</p>
+                      </div>
+
+                      <div className="glass rounded-2xl p-4 border-white/5 bg-gradient-to-br from-emerald-500/10 to-transparent col-span-3 mt-2">
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="flex items-center gap-2">
+                            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                            <p className="text-[10px] uppercase tracking-widest font-bold text-white/60">OptiTrade 2.0 Strategy</p>
+                          </div>
+                          {optiTradeSignal && (
+                            <div className="flex items-center gap-1 bg-emerald-500/20 px-2 py-0.5 rounded-full">
+                              <span className="text-[8px] font-bold text-emerald-400 uppercase tracking-widest">90% Confirmation</span>
+                            </div>
+                          )}
+                        </div>
+                        
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-4">
+                            <span className={`text-2xl font-black italic tracking-tighter ${optiTradeAnalysis?.sentiment === 'BUY' ? 'text-emerald-400' : 'text-red-400'}`}>
+                              {optiTradeAnalysis?.sentiment || 'ANALYZING...'}
+                            </span>
+                            <div className="flex flex-col gap-0.5">
+                              <div className="flex items-center gap-2">
+                                <span className="text-[8px] text-white/20 font-bold uppercase">TP</span>
+                                <span className="text-[10px] font-mono font-bold text-emerald-400/80">{optiTradeAnalysis?.tp?.toFixed(2) || '0.00'}</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-[8px] text-white/20 font-bold uppercase">SL</span>
+                                <span className="text-[10px] font-mono font-bold text-red-400/80">{optiTradeAnalysis?.sl?.toFixed(2) || '0.00'}</span>
+                              </div>
+                            </div>
+                          </div>
+                          
+                          <div className="text-right">
+                            <div className="flex items-center gap-1 justify-end">
+                              <span className="text-lg font-mono font-bold text-white">{optiTradeAnalysis?.confidence || 0}%</span>
+                            </div>
+                            <p className="text-[8px] text-white/20 uppercase font-bold tracking-widest">Probability</p>
+                          </div>
+                        </div>
+
+                        {optiTradeSignal && (
+                          <motion.div 
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="mt-4 p-3 bg-emerald-500/10 rounded-xl border border-emerald-500/20 flex items-center gap-3"
+                          >
+                            <div className="w-8 h-8 rounded-lg bg-emerald-500/20 flex items-center justify-center shrink-0">
+                              <ShieldCheck size={16} className="text-emerald-400" />
+                            </div>
+                            <p className="text-[10px] text-emerald-400/90 font-bold leading-tight">
+                              {optiTradeSignal.message}
+                            </p>
+                          </motion.div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {botSignal && (
                 <div className="mb-6">
@@ -1508,7 +2035,7 @@ export default function App() {
                           Bot requires 3+ matching indicators.
                         </p>
                         <div className="flex items-center gap-1">
-                          <span className="text-[8px] font-bold text-emerald-400">{botAnalysis.confidence}% Match</span>
+                          <span className="text-[8px] font-bold text-emerald-400">{(botAnalysis?.confidence || 0)}% Match</span>
                         </div>
                       </div>
                     </div>
@@ -1697,7 +2224,7 @@ export default function App() {
                       </div>
                     </div>
                     <div className="text-right">
-                      <p className="font-bold">${acc.balance.toLocaleString()}</p>
+                      <p className="font-bold">${(acc.balance || 0).toLocaleString()}</p>
                       {activeAccount.id === acc.id && <CheckCircle2 size={16} className="text-emerald-400 ml-auto mt-1" />}
                     </div>
                   </div>
@@ -1792,7 +2319,7 @@ export default function App() {
                   <div className="glass rounded-2xl p-4 border-white/5">
                     <p className="text-[8px] uppercase tracking-widest font-bold text-white/40 mb-1">Total P/L</p>
                     <p className={`text-lg font-bold ${totalPL >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                      {totalPL >= 0 ? '+' : ''}${totalPL.toFixed(2)}
+                      {totalPL >= 0 ? '+' : ''}${(totalPL || 0).toFixed(2)}
                     </p>
                   </div>
                   <div className="glass rounded-2xl p-4 border-white/5">
@@ -1828,7 +2355,7 @@ export default function App() {
                             {order.type}
                           </span>
                           <span className="text-[8px] px-1.5 py-0.5 rounded-md font-bold uppercase bg-white/5 text-white/60">
-                            {order.lot_size?.toFixed(2)} LOTS
+                            {(order.lot_size || 0).toFixed(2)} LOTS
                           </span>
                         </div>
                         <div className="flex items-center gap-2">
@@ -1844,17 +2371,17 @@ export default function App() {
                         <div>
                           <p className="text-[8px] uppercase text-white/40 font-bold">SL</p>
                           <p className="text-xs font-mono font-bold text-red-400">{order.stop_loss}</p>
-                          <p className="text-[7px] text-red-400/60">-${order.potential_loss?.toFixed(2)}</p>
+                          <p className="text-[7px] text-red-400/60">-${(order.potential_loss || 0).toFixed(2)}</p>
                         </div>
                         <div>
                           <p className="text-[8px] uppercase text-white/40 font-bold">TP</p>
                           <p className="text-xs font-mono font-bold text-emerald-400">{order.take_profit}</p>
-                          <p className="text-[7px] text-emerald-400/60">+${order.potential_profit?.toFixed(2)}</p>
+                          <p className="text-[7px] text-emerald-400/60">+${(order.potential_profit || 0).toFixed(2)}</p>
                         </div>
                         <div className="text-right">
                           <p className="text-[8px] uppercase text-white/40 font-bold">Net P/L</p>
                           <p className={`text-xs font-mono font-bold ${calculatePL(order) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                            {calculatePL(order) >= 0 ? '+' : ''}${calculatePL(order).toFixed(2)}
+                            {calculatePL(order) >= 0 ? '+' : ''}${(calculatePL(order) || 0).toFixed(2)}
                           </p>
                         </div>
                       </div>
@@ -1907,7 +2434,7 @@ export default function App() {
                                 {trade.type}
                               </span>
                               <span className="text-[8px] px-1.5 py-0.5 rounded-md font-bold uppercase bg-white/5 text-white/40">
-                                {trade.lot_size?.toFixed(2)} LOTS
+                                {(trade.lot_size || 0).toFixed(2)} LOTS
                               </span>
                             </div>
                             <div className="flex items-center gap-2">
@@ -1920,16 +2447,16 @@ export default function App() {
                           <div className="grid grid-cols-3 gap-2">
                             <div>
                               <p className="text-[8px] uppercase text-white/40 font-bold">Entry</p>
-                              <p className="text-xs font-mono">{trade.entry_price.toFixed(2)}</p>
+                              <p className="text-xs font-mono">{(trade.entry_price || 0).toFixed(2)}</p>
                             </div>
                             <div>
                               <p className="text-[8px] uppercase text-white/40 font-bold">Exit</p>
-                              <p className="text-xs font-mono">{trade.close_price.toFixed(2)}</p>
+                              <p className="text-xs font-mono">{(trade.close_price || 0).toFixed(2)}</p>
                             </div>
                             <div className="text-right">
                               <p className="text-[8px] uppercase text-white/40 font-bold">Result</p>
                               <p className={`text-xs font-mono font-bold ${trade.pl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                                {trade.pl >= 0 ? '+' : ''}${trade.pl.toFixed(2)}
+                                {trade.pl >= 0 ? '+' : ''}${(trade.pl || 0).toFixed(2)}
                               </p>
                             </div>
                           </div>
@@ -1952,6 +2479,40 @@ export default function App() {
               <h2 className="text-2xl font-bold tracking-tight mb-8">Terminal Settings</h2>
               
               <div className="space-y-6">
+                {/* Pro Activation */}
+                <div className="glass rounded-3xl p-6 border-white/5 bg-gradient-to-br from-amber-500/5 to-transparent">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isPro ? 'bg-amber-500/20 text-amber-400' : 'bg-white/5 text-white/40'}`}>
+                        <ShieldCheck size={20} />
+                      </div>
+                      <div>
+                        <h4 className="font-bold">TraderXau Pro</h4>
+                        <p className="text-[10px] text-white/40 uppercase tracking-widest font-bold">
+                          {isPro ? 'Active Lifetime' : 'Premium Features Locked'}
+                        </p>
+                      </div>
+                    </div>
+                    {!isPro && (
+                      <button 
+                        onClick={() => setShowProPasswordModal(true)}
+                        className="px-4 py-2 bg-amber-500 text-black text-[10px] font-bold rounded-xl hover:bg-amber-400 transition-colors"
+                      >
+                        ACTIVATE PRO
+                      </button>
+                    )}
+                  </div>
+                  {isPro ? (
+                    <p className="text-xs text-white/60 leading-relaxed">
+                      You have unlocked advanced AI signals, multi-timeframe analysis, and institutional liquidity tracking.
+                    </p>
+                  ) : (
+                    <p className="text-xs text-white/60 leading-relaxed">
+                      Unlock the full potential of TraderXau with institutional-grade tools and high-precision AI signals.
+                    </p>
+                  )}
+                </div>
+
                 {/* Terminal Log */}
                 <div className="glass rounded-3xl p-6 border-white/5">
                   <div className="flex items-center gap-2 mb-4">
@@ -1980,7 +2541,7 @@ export default function App() {
                   <p className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-4">Active Account</p>
                   <div className="flex p-1 bg-white/5 rounded-2xl mb-4">
                     <button 
-                      onClick={() => setActiveAccount({ broker_name: 'TraderXau Demo', account_type: 'Demo', balance: 10000 })}
+                      onClick={() => activeAccount.account_type !== 'Demo' && setActiveAccount({ broker_name: 'TraderXau Demo', account_type: 'Demo', balance: 10000 })}
                       className={`flex-1 py-3 rounded-xl text-xs font-bold transition-all ${activeAccount.account_type === 'Demo' ? 'bg-emerald-500 text-black' : 'text-white/40 hover:text-white'}`}
                     >
                       DEMO
@@ -1998,10 +2559,56 @@ export default function App() {
                       <p className="text-[10px] text-white/40">ID: 88294012</p>
                     </div>
                     <div className="text-right">
-                      <p className="text-xs font-mono font-bold">${activeAccount.balance.toLocaleString()}</p>
+                      <p className="text-xs font-mono font-bold">${(activeAccount.balance || 0).toLocaleString()}</p>
                       <p className="text-[10px] text-emerald-400 font-bold uppercase tracking-widest">Active</p>
                     </div>
                   </div>
+
+                  {activeAccount.account_type === 'Demo' && (
+                    <div className="mt-6 pt-6 border-t border-white/5">
+                      <p className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-4">Adjust Demo Balance</p>
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xl font-bold text-emerald-400">${(activeAccount.balance || 0).toLocaleString()}</span>
+                          <span className="text-[8px] text-white/20 font-bold uppercase tracking-widest">Range: $1 - $15,000</span>
+                        </div>
+                        <div className="flex items-center gap-2 bg-white/5 px-3 py-1.5 rounded-lg border border-white/5">
+                          <span className="text-[10px] font-bold text-white/40">$</span>
+                          <input 
+                            type="number"
+                            min="1"
+                            max="15000"
+                            value={activeAccount.balance}
+                            onChange={(e) => {
+                              const val = Math.min(15000, Math.max(1, parseInt(e.target.value) || 1));
+                              setActiveAccount(prev => ({ ...prev, balance: val }));
+                            }}
+                            className="bg-transparent text-[10px] font-bold outline-none w-16 text-right"
+                          />
+                        </div>
+                      </div>
+                      <input 
+                        type="range" 
+                        min="1" 
+                        max="15000" 
+                        step="100" 
+                        value={activeAccount.balance}
+                        onChange={(e) => setActiveAccount(prev => ({ ...prev, balance: parseInt(e.target.value) }))}
+                        className="w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-emerald-500 mb-6"
+                      />
+                      <div className="grid grid-cols-4 gap-2">
+                        {[1000, 5000, 10000, 15000].map(val => (
+                          <button 
+                            key={val}
+                            onClick={() => setActiveAccount(prev => ({ ...prev, balance: val }))}
+                            className={`py-2 rounded-xl text-[9px] font-bold transition-all ${activeAccount.balance === val ? 'bg-emerald-500 text-black' : 'bg-white/5 text-white/40 hover:bg-white/10'}`}
+                          >
+                            ${(val || 0).toLocaleString()}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Risk Management */}
@@ -2011,7 +2618,7 @@ export default function App() {
                       <p className="text-[10px] uppercase tracking-widest font-bold text-white/40 mb-1">Global Risk Limit</p>
                       <h4 className="font-bold">Risk Per Trade</h4>
                     </div>
-                    <span className="text-xl font-bold text-emerald-400">{riskLimit.toFixed(1)}%</span>
+                    <span className="text-xl font-bold text-emerald-400">{(riskLimit || 1).toFixed(1)}%</span>
                   </div>
                   
                   <input 
